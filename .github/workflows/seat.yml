@@ -26,7 +26,7 @@ concurrency:
 jobs:
   grab:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -60,13 +60,12 @@ jobs:
         env:
           MODE: ${{ inputs.mode }}
         run: |
-          if [ "$MODE" = "dryrun" ]; then
-            echo "模式: dryrun（不提交预约）"
-            python main.py dryrun
-          else
-            echo "模式: grab（真实提交）"
-            python main.py grab
-          fi
+          case "$MODE" in
+            dryrun)  python -u main.py dryrun ;;
+            diagnose) python -u diagnose.py ;;
+            grab)    python -u main.py grab ;;
+            *)       echo "未知模式 $MODE"; exit 2 ;;
+          esac
 
       - name: 上传日志
         if: always()
