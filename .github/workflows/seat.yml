@@ -44,7 +44,7 @@ jobs:
           echo "北京时间 $(TZ=Asia/Shanghai date '+%F %T')"
           if [ "$HM" -lt 390 ] || [ "$HM" -gt 690 ]; then
             echo "不在抢座窗口（06:30-11:30），跳过本轮"
-            exit 78
+            exit 0
           fi
 
       - name: 检出代码
@@ -55,7 +55,7 @@ jobs:
           TODAY=$(TZ=Asia/Shanghai date +%F)
           if [ -f "done_${TODAY}.txt" ]; then
             echo "今日($TODAY)已处理：$(cat done_${TODAY}.txt) → 本轮作废"
-            exit 78
+            exit 0
           fi
           echo "今日($TODAY)尚未处理，继续"
 
