@@ -48,6 +48,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for i in $(seq 1 60); do
             sleep 600
+            git pull --rebase origin main || git pull --rebase --autostash origin main || true
             git commit --amend --no-edit --allow-empty -m "heartbeat $(date -u +%H%M%S)"
             git push --force || echo "push 失败，继续等待下一次心跳"
           done
@@ -73,6 +74,15 @@ jobs:
 
       - name: 检出代码
         uses: actions/checkout@v4
+
+      - name: 今日是否已处理（成功或放弃都写标记，避免重复消耗与重复提交）
+        run: |
+          TODAY=$(TZ=Asia/Shanghai date +%F)
+          if [ -f "done_${TODAY}.txt" ]; then
+            echo "今日($TODAY)已处理：$(cat done_${TODAY}.txt) → 本轮作废"
+            exit 78
+          fi
+          echo "今日($TODAY)尚未处理，继续"
 
       - name: 设置时区（代码层已固定北京时间，这里只是兜底）
         run: sudo timedatectl set-timezone Asia/Shanghai || true
@@ -112,6 +122,19 @@ jobs:
             grab)    python -u main.py grab ;;
             *)       echo "未知模式 $MODE"; exit 2 ;;
           esac
+
+      - name: 提交今日标记（供后续 run 作废判断）
+        if: always()
+        run: |
+          TODAY=$(TZ=Asia/Shanghai date +%F)
+          if [ -f "done_${TODAY}.txt" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add "done_${TODAY}.txt" || true
+            git commit -m "done ${TODAY}: $(cat done_${TODAY}.txt)" || true
+            git pull --rebase origin main || true
+            git push || echo "标记提交失败（下一轮 run 会重试）"
+          fi
 
       - name: 结果摘要（手机上 GitHub App 也能直接看）
         if: always()
