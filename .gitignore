@@ -19,3 +19,6 @@ harness_verify.js
 # 本地临时报告
 *.txt
 !requirements.txt
+
+# 但"今日完成标记"必须入库（Actions 用它判断是否作废本轮）
+!done_*.txt
