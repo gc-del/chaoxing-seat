@@ -2,8 +2,13 @@ name: seat-grab
 
 on:
   schedule:
-    # 测试：每 2 分钟触发一次，用于快速验证 schedule 是否生效
-    - cron: "*/2 * * * *"
+    # 正式触发点（UTC 22:40~22:55 = 北京 06:40~06:55，刻意避开整点拥塞）
+    # 注：本账号的 schedule 事件实测不可用（社区已知问题），保留仅作备份，
+    #     真正生效的是下方 heartbeat 推送链
+    - cron: "40 22 * * *"
+    - cron: "45 22 * * *"
+    - cron: "50 22 * * *"
+    - cron: "55 22 * * *"
   push:
     branches: [main]
   workflow_dispatch:
@@ -19,19 +24,53 @@ on:
           - grab
 
 permissions:
-  contents: read
-
-concurrency:
-  group: seat-grab
-  cancel-in-progress: false
+  contents: write
 
 jobs:
+  # 心跳链：GitHub 的 schedule 事件在本账号上不可用（免费账户+新账号，
+  # 私有仓库 cron 不触发，改公开后仍被账号级限制卡住，实测 0 次触发）。
+  # 故改用 push 自循环：定期推一个 amend 空提交唤醒下一次运行。
+  # 公开仓库 Actions 额度无限，runner 占用无成本。
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    concurrency:
+      group: heartbeat
+      cancel-in-progress: true   # 始终只保留一个心跳 job
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 心跳循环（每 10 分钟推一次 amend 空提交，唤醒下一次运行）
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in $(seq 1 60); do
+            sleep 600
+            git commit --amend --no-edit --allow-empty -m "heartbeat $(date -u +%H%M%S)"
+            git push --force || echo "push 失败，继续等待下一次心跳"
+          done
+
   grab:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 110
+    concurrency:
+      group: grab
+      cancel-in-progress: false
     env:
       TZ: Asia/Shanghai
     steps:
+      - name: 窗口判断（窗口外立即退出，不浪费 runner 与额度）
+        run: |
+          H=$(TZ=Asia/Shanghai date +%H); M=$(TZ=Asia/Shanghai date +%M)
+          HM=$((10#$H * 60 + 10#$M))
+          echo "北京时间 $(TZ=Asia/Shanghai date '+%F %T')"
+          if [ "$HM" -lt 390 ] || [ "$HM" -gt 690 ]; then
+            echo "不在抢座窗口（06:30-11:30），跳过本轮"
+            exit 78
+          fi
+
       - name: 检出代码
         uses: actions/checkout@v4
 
