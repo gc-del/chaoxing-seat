@@ -33,7 +33,6 @@ def env_bool(name, default=False):
         return default
     return v in ("1", "true", "yes", "on")
 
-
 def build_config():
     return {
         "dry_run": env_bool("CX_DRY_RUN", False),
@@ -53,6 +52,7 @@ def build_config():
         "ai_samples": env_int("AI_SAMPLES", 3),
         "ai_image_scale": env_int("AI_IMAGE_SCALE", 3),
         "ai_thinking": env("AI_THINKING", "disabled"),
+        "ai_crop_verify": env_bool("AI_CROP_VERIFY", False),
         "ai_max_rounds": env_int("AI_MAX_ROUNDS", 2),
         "ai_pre_rounds": env_int("AI_PRE_ROUNDS", 12),
         "captcha_max_rounds": env_int("CAPTCHA_MAX_ROUNDS", 10),
