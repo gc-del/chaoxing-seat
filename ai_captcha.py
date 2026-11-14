@@ -28,11 +28,13 @@ class AICaptchaSolver:
 
     def preload_models(self):
         provider = (self._cfg.get("ai_vision_provider") or "deepseek").lower()
-        key_field = {"glm": "glm_api_key", "gemini": "gemini_api_key"}.get(provider, "deepseek_api_key")
-        if not self._cfg.get(key_field):
-            self._log(f"[AI] {provider} 未配置 api_key，将全程人工点选")
+        providers = [p.strip() for p in
+                     (self._cfg.get("ai_providers") or provider).split(",") if p.strip()]
+        ready = [p for p in providers if ai_vision.provider_ready(self._cfg, p)]
+        if ready:
+            self._log(f"[AI] 视觉后端 {','.join(ready)} 已就绪")
         else:
-            self._log(f"[AI] 视觉后端 {provider} 已就绪")
+            self._log(f"[AI] {','.join(providers)} 未配置 api_key，将全程人工点选")
 
     def _to_original(self, point, w, h):
         """把模型坐标（基于放大图尺寸）换算回原图，越界返回 None"""
@@ -62,6 +64,11 @@ class AICaptchaSolver:
                      (self._cfg.get("ai_providers")
                       or self._cfg.get("ai_vision_provider") or "deepseek").split(",")
                      if p.strip()]
+        ready = [p for p in providers if ai_vision.provider_ready(self._cfg, p)]
+        if ready:
+            providers = ready
+        else:
+            self._log(f"[AI] 无可用后端（{providers} 均未配置 key）")
         pool = {word: [] for word in words}
         raw = ""
         for i in range(samples):
