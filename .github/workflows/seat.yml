@@ -27,9 +27,14 @@ jobs:
   grab:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      TZ: Asia/Shanghai
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+
+      - name: 设置时区（代码层已固定北京时间，这里只是兜底）
+        run: sudo timedatectl set-timezone Asia/Shanghai || true
 
       - name: 准备 Python
         uses: actions/setup-python@v5
