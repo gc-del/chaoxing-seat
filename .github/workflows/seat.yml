@@ -3,7 +3,7 @@ name: seat-grab
 on:
   schedule:
     # UTC 22:50 = 北京时间 06:50（刻意避开整点，GitHub 整点排队严重、延迟大）
-    - cron: "50 22 * * *"
+    - cron: "*/3 * * * *"   # 临时：每 3 分钟一次，用于验证定时触发是否生效（验证后会改回）
   workflow_dispatch:
     inputs:
       mode:
@@ -71,6 +71,14 @@ jobs:
             grab)    python -u main.py grab ;;
             *)       echo "未知模式 $MODE"; exit 2 ;;
           esac
+
+      - name: 结果摘要（手机上 GitHub App 也能直接看）
+        if: always()
+        run: |
+          echo "## 抢座任务结果" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          tail -n 40 debug_median/log_*.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null \
+            || echo "(无日志产出)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: 上传日志
         if: always()
