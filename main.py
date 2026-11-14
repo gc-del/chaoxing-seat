@@ -151,6 +151,17 @@ def wait_to(target_ts):
         time.sleep(min(remain, 30))
 
 
+def write_done_flag(status, note=""):
+    """写入今日完成标记（Actions 后续 run 读到即作废，避免重复消耗与重复提交）"""
+    day = today_cn().isoformat()
+    path = BASE_DIR / f"done_{day}.txt"
+    try:
+        path.write_text(f"{status} {note}".strip(), encoding="utf-8")
+    except Exception:
+        return None
+    return path
+
+
 def next_target_datetime(cfg):
     grab_time = cfg["grab_time"]
     days = [d.lower().strip() for d in (cfg.get("days_of_week") or [])]
@@ -344,9 +355,11 @@ def cmd_once(cfg, _log):
         push_note(cfg, "预约成功",
                   f"房间 {cfg['room_id']} 座位 {cfg['seat_num']} "
                   f"{cfg['start_time']}-{cfg['end_time']} 日期 {info['day']}")
+        write_done_flag("ok", f"seat={cfg['seat_num']} {info['day']}")
         return 0
     beep(False)
     push_note(cfg, "预约未成功", f"服务端响应: {str(resp)[:120]}")
+    write_done_flag("fail", "手动补抢未成功")
     return 1
 
 
@@ -399,54 +412,27 @@ def cmd_grab(cfg, _log):
             _log(f"登录失败: {e}，60 秒后重试")
             time.sleep(60)
 
-    pre_lead = int(cfg.get("pre_brush_lead_minutes") or 9) * 60
-    wait_to(target.timestamp() - pre_lead)
-    _log("开始预刷点选验证码（validate 有效期约 5 分钟）...")
+    # 到点才解题：validate 只保 5 分钟，提前解出来到提交时已过期作废，
+    # 还会白耗失败次数（风控累积），所以不做提前预刷。
+    wait_to(target.timestamp() - 3)
+    _log("到点，开始解题（最多 10 题）...")
     validate = None
-    validate_time = 0.0
-    max_fails = int(cfg.get("pre_brush_fails") or 3)
-    fails = 0
-    while fails < max_fails and time.time() < target.timestamp() - 10:
-        if validate is not None and target.timestamp() - time.time() <= 240:
-            break  # 现有 validate 能覆盖到提交时刻
-        validate = None
+    for attempt in range(1, 4):
         try:
             from captcha_click import new_session
             validate = solver.solve(new_session(),
                                     referer=f"{OFFICE}/front/third/apps/seat/select",
-                                    max_rounds=int(cfg.get("ai_pre_rounds") or 8),
+                                    max_rounds=int(cfg.get("captcha_max_rounds") or 10),
                                     save_dir=DEBUG_DIR, allow_manual=False)
-            validate_time = time.time()
-            _log(f"[OK] 预刷成功: {str(validate)[:40]}...")
+            _log(f"[OK] 验证码通过: {str(validate)[:40]}...")
+            break
         except Exception as e:
-            if "后端不可用" in str(e):
-                _log(f"AI 后端暂时不可用，30 秒后重试: {str(e)[:60]}")
-                time.sleep(30)
+            if "后端不可用" in str(e) and attempt < 3:
+                _log(f"AI 后端暂时不可用，20 秒后重试({attempt}/3): {str(e)[:60]}")
+                time.sleep(20)
                 continue
-            fails += 1
-            _log(f"预刷失败({fails}/{max_fails}): {e}")
-            time.sleep(3)
-            continue
-        if validate is not None and target.timestamp() - time.time() > 240:
-            time.sleep(60)  # 刷得太早，稍后再刷，避免频繁取题
-    if validate is None:
-        _log("预刷未成功，改为提交前实时刷（会损失 1~3 秒）")
-
-    wait_to(target.timestamp() - 35)
-    if not validate or target.timestamp() - validate_time > 240:
-        _log("无可用 validate，提交前实时取验证码...")
-        for attempt in range(1, 4):
-            try:
-                from captcha_click import new_session
-                validate = solver.solve(new_session(),
-                                        referer=f"{OFFICE}/front/third/apps/seat/select",
-                                        max_rounds=int(cfg.get("captcha_max_rounds") or 4),
-                                        save_dir=DEBUG_DIR, allow_manual=False)
-                _log(f"[OK] 实时取码成功: {str(validate)[:40]}...")
-                break
-            except Exception as e:
-                _log(f"实时取验证码失败({attempt}/3): {str(e)[:60]}")
-                time.sleep(2)
+            _log(f"验证码失败({attempt}/3): {str(e)[:80]}")
+            break
     day = today_cn()
     if cfg.get("reserve_next_day", True):
         day += datetime.timedelta(days=1)
@@ -484,6 +470,7 @@ def cmd_grab(cfg, _log):
             push_note(cfg, "抢座成功",
                       f"房间 {cfg['room_id']} 座位 {cfg['seat_num']} "
                       f"{cfg['start_time']}-{cfg['end_time']} 日期 {info['day']}")
+            write_done_flag("ok", f"seat={cfg['seat_num']} {info['day']}")
             return 0
         _log(f"第 {attempt} 次提交失败: {str(resp)[:200]}")
         if attempt >= max_attempts:
@@ -495,7 +482,7 @@ def cmd_grab(cfg, _log):
                 from captcha_click import new_session
                 new_validate = solver.solve(new_session(),
                                             referer=f"{OFFICE}/front/third/apps/seat/select",
-                                            max_rounds=int(cfg.get("captcha_max_rounds") or 4),
+                                            max_rounds=3,
                                             save_dir=DEBUG_DIR, allow_manual=False)
                 page = client.fetch_seat_page(cfg["room_id"], cfg["seat_num"])
                 info = client.build_submit(
@@ -513,6 +500,7 @@ def cmd_grab(cfg, _log):
     _log("本轮抢座结束(未成功)。日志已存 debug_median。")
     beep(False)
     push_note(cfg, "抢座未成功", f"房间 {cfg['room_id']} 座位 {cfg['seat_num']}，详见日志")
+    write_done_flag("fail", "今日已放弃（达到重试上限）")
     return 1
 
 
