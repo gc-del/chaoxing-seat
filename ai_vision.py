@@ -40,6 +40,24 @@ _TARGET_CENTER_RE = re.compile(
     r'"center"\s*:\s*\{\s*"x"\s*:\s*(-?[\d.]+)\s*,\s*"y"\s*:\s*(-?[\d.]+)\s*\}')
 
 
+def build_char_prompt():
+    """单个汉字裁剪图的识别提示词"""
+    return ("这是一张放大的单个汉字图片。请判断图中这个字是什么字，"
+            "只输出这个字本身（单个汉字），不要任何标点、解释或多余文字。"
+            "若完全无法辨认则输出 ?。")
+
+
+def parse_char(text):
+    """从模型输出里取第一个汉字"""
+    if not text:
+        return ""
+    t = text.replace("```", "").replace('"', "").replace("'", "").strip()
+    for ch in t:
+        if "\u4e00" <= ch <= "\u9fff":
+            return ch
+    return ""
+
+
 def parse_targets(text):
     """解析模型输出的字清单 → [{char, center:{x,y}}]，非法 JSON 时正则兜底"""
     if not text:
@@ -201,6 +219,23 @@ def call_gemini(api_key, image_bytes, prompt, model="gemini-2.5-flash", proxy=No
         raise RuntimeError(f"Gemini 错误: {str(data['error'])[:200]}")
     parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
     return "".join(p.get("text", "") for p in parts)
+
+
+PROVIDER_KEY_FIELD = {
+    "deepseek": "deepseek_api_key",
+    "glm": "glm_api_key",
+    "qwen": "qwen_api_key",
+    "doubao": "doubao_api_key",
+    "gemini": "gemini_api_key",
+}
+
+
+def provider_ready(cfg, provider):
+    """该后端是否已配置可用的 key（未配置则跳过，不浪费采样次数）"""
+    field = PROVIDER_KEY_FIELD.get((provider or "").lower())
+    if not field:
+        return False
+    return bool((cfg.get(field) or "").strip())
 
 
 def ask_vision(cfg, image_bytes, prompt, provider=None):
