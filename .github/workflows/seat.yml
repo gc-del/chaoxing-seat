@@ -2,8 +2,8 @@ name: seat-grab
 
 on:
   schedule:
-    # 测试：每小时的 50/53/56 分各触发一次，验证 schedule 是否已生效
-    - cron: "50,53,56 * * * *"
+    # 测试：每 2 分钟触发一次，用于快速验证 schedule 是否生效
+    - cron: "*/2 * * * *"
   push:
     branches: [main]
   workflow_dispatch:
