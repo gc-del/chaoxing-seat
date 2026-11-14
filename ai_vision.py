@@ -79,8 +79,13 @@ def parse_targets(text):
             xy = _item_center(it)
             if xy is None:
                 continue
+            box = it.get("bbox") or it.get("box")
+            if isinstance(box, dict):
+                box = [box.get("xmin"), box.get("ymin"), box.get("xmax"), box.get("ymax")]
+            if not (isinstance(box, (list, tuple)) and len(box) >= 4):
+                box = None
             out.append({"char": str(it.get("char") or "").strip(),
-                        "center": {"x": xy[0], "y": xy[1]}})
+                        "center": {"x": xy[0], "y": xy[1]}, "bbox": box})
         if out:
             return out
 
@@ -89,14 +94,18 @@ def parse_targets(text):
         char = seg.split('"')[0].strip()
         bbox = _TARGET_BBOX_RE.search(seg[:400])
         center = _TARGET_CENTER_RE.search(seg[:400])
+        box = None
         if bbox:
             x = (float(bbox.group(1)) + float(bbox.group(3))) / 2
             y = (float(bbox.group(2)) + float(bbox.group(4))) / 2
+            box = [float(bbox.group(1)), float(bbox.group(2)),
+                   float(bbox.group(3)), float(bbox.group(4))]
         elif center:
             x, y = float(center.group(1)), float(center.group(2))
         else:
             continue
-        out.append({"char": char, "center": {"x": int(round(x)), "y": int(round(y))}})
+        out.append({"char": char, "center": {"x": int(round(x)), "y": int(round(y))},
+                    "bbox": box})
     return out
 
 
