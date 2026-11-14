@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """学习通登录 / 座位页解析 / 房间列表 / 预约提交"""
 import re
+import time
 
 import requests
 
@@ -75,15 +76,30 @@ class ChaoxingClient:
         raise ChaoxingError(f"登录失败: {msg}")
 
     def fetch_seat_page(self, room_id, seat_num):
+        """取座位页并提取 submit_enc 盐值。
+
+        实测：偶发返回未渲染的模板页（无 submit_enc），预热房间列表后重试即可恢复，
+        故此处做有限次自愈重试，保证无人值守时不被瞬时波动卡住。
+        """
         url = f"{SEAT_CODE_URL}?id={room_id}&seatNum={seat_num}"
-        r = self.session.get(url, timeout=(10, 20))
-        html = r.text
-        if r.status_code != 200:
-            raise ChaoxingError(f"座位页 HTTP {r.status_code}")
-        if "passport2.chaoxing.com" in html and "seat" not in html:
-            raise ChaoxingError("座位页被重定向到登录页（登录态失效，重新登录）")
-        # 新版协议：submit_enc 隐藏域 = enc 签名的盐值
-        enc_salt = _first_match(html, TOKEN_PATTERNS)
+        html = ""
+        enc_salt = None
+        for attempt in range(1, 4):
+            r = self.session.get(url, timeout=(10, 20))
+            html = r.text
+            if r.status_code != 200:
+                raise ChaoxingError(f"座位页 HTTP {r.status_code}")
+            if "passport2.chaoxing.com" in html and "seat" not in html:
+                raise ChaoxingError("座位页被重定向到登录页（登录态失效，重新登录）")
+            enc_salt = _first_match(html, TOKEN_PATTERNS)
+            if enc_salt:
+                break
+            if attempt < 3:
+                time.sleep(1.5)
+                try:
+                    self.session.get(ROOM_LIST_URL, timeout=(10, 15))
+                except Exception:
+                    pass
         dept_enc = _first_match(html, DEPT_ENC_PATTERNS)
         return {"url": url, "html": html, "enc_salt": enc_salt, "dept_enc": dept_enc}
 
