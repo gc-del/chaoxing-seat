@@ -60,7 +60,7 @@ def build_config():
         "login_lead_minutes": env_int("LOGIN_LEAD_MINUTES", 10),
         "pre_brush_lead_minutes": env_int("PRE_BRUSH_LEAD_MINUTES", 9),
         "catchup_hours": float(env("CATCHUP_HOURS", 4)),
-        "max_wait_minutes": env_int("MAX_WAIT_MINUTES", 25),
+        "max_wait_minutes": env_int("MAX_WAIT_MINUTES", 90),
         "loop_start_hour": 6,
         "loop_backfill": False,
         "deepseek_api_key": env("DEEPSEEK_KEY", ""),
