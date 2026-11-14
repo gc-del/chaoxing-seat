@@ -7,6 +7,7 @@
 import base64
 import json
 import re
+import time
 
 import requests
 
@@ -169,26 +170,35 @@ def call_deepseek(api_key, image_bytes, prompt, model="deepseek-flash",
     return data["choices"][0]["message"]["content"]
 
 
-def call_glm(api_key, image_bytes, prompt, model="glm-4v-flash"):
-    """智谱 GLM 视觉系列（open.bigmodel.cn），key 形如 id.secret"""
+def call_glm(api_key, image_bytes, prompt, model="glm-4v-flash", retries=2):
+    """智谱 GLM 视觉系列（open.bigmodel.cn），key 形如 id.secret
+
+    免费模型有速率限制，超限返回 429 → 退避重试。
+    """
     b64 = base64.b64encode(image_bytes).decode()
-    r = requests.post(
-        GLM_URL,
-        headers={"Authorization": f"Bearer {api_key}",
-                 "Content-Type": "application/json"},
-        json={
-            "model": model,
-            "messages": [{
-                "role": "user",
-                "content": [
-                    {"type": "image_url",
-                     "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                    {"type": "text", "text": prompt},
-                ],
-            }],
-        },
-        timeout=TIMEOUT,
-    )
+    payload = {
+        "model": model,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "image_url",
+                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                {"type": "text", "text": prompt},
+            ],
+        }],
+    }
+    for attempt in range(retries + 1):
+        r = requests.post(
+            GLM_URL,
+            headers={"Authorization": f"Bearer {api_key}",
+                     "Content-Type": "application/json"},
+            json=payload,
+            timeout=TIMEOUT,
+        )
+        if r.status_code == 429 and attempt < retries:
+            time.sleep(3 * (attempt + 1))
+            continue
+        break
     r.raise_for_status()
     data = r.json()
     if "error" in data:
