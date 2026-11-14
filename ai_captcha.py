@@ -94,9 +94,11 @@ class AICaptchaSolver:
                     for item in pool[word]:
                         if abs(item[0][0] - xy[0]) <= 8 and abs(item[0][1] - xy[1]) <= 8:
                             item[1] += 1
+                            if item[2] is None and t.get("bbox"):
+                                item[2] = t["bbox"]
                             break
                     else:
-                        pool[word].append([xy, 1])
+                        pool[word].append([xy, 1, t.get("bbox"), 0])
 
         primary_ok = 0
         for _ in range(samples):
@@ -117,16 +119,62 @@ class AICaptchaSolver:
         if any(not pool[word] for word in words):
             return None, raw, []
 
+        # 裁剪二次确认：同一字出现多个候选实例时，把每个实例单独裁剪放大再问模型
+        # 「这是什么字」，用来排除"把别的字误认成目标字"的情况。
+        if self._cfg.get("ai_crop_verify", True):
+            for word in words:
+                items = pool[word]
+                if len(items) < 2:
+                    continue
+                for item in items[:2]:
+                    if not item[2]:
+                        continue
+                    crop = self._crop_char(big, item[2])
+                    if not crop:
+                        continue
+                    try:
+                        reply = ai_vision.ask_vision(self._cfg, crop,
+                                                     ai_vision.build_char_prompt(), primary)
+                        got = ai_vision.parse_char(reply)
+                    except Exception as e:
+                        self._log(f"[AI] 裁剪确认失败: {str(e)[:60]}")
+                        continue
+                    if got == word:
+                        item[3] += 3
+                        self._log(f"[AI] 裁剪确认命中 {word} @ {item[0]}")
+
         ranked = []
         for word in words:
-            ranked.append(sorted(pool[word], key=lambda it: -it[1])[:3])
+            ranked.append(sorted(pool[word], key=lambda it: (-it[3], -it[1]))[:3])
         combos = []
         for combo in itertools.product(*ranked):
-            score = sum(it[1] for it in combo)
+            score = sum(it[3] * 10 + it[1] for it in combo)
             coords = [{"x": it[0][0], "y": it[0][1]} for it in combo]
             combos.append((score, coords))
         combos.sort(key=lambda t: -t[0])
         return combos[0][1], raw, [c for _, c in combos]
+
+    def _crop_char(self, big, bbox):
+        """按 bbox 从放大图中裁剪该字区域并放大居中，返回 jpeg 字节（失败返回 None）"""
+        try:
+            x1, y1, x2, y2 = [float(v) for v in bbox[:4]]
+        except (TypeError, ValueError):
+            return None
+        pad = max(4.0, (x2 - x1) * 0.35)
+        x1, y1 = max(0.0, x1 - pad), max(0.0, y1 - pad)
+        x2, y2 = min(float(big.width), x2 + pad), min(float(big.height), y2 + pad)
+        if x2 - x1 < 6 or y2 - y1 < 6:
+            return None
+        crop = big.crop((int(x1), int(y1), int(x2), int(y2))).convert("RGB")
+        scale = 224.0 / max(crop.width, crop.height)
+        nw = max(8, int(crop.width * scale))
+        nh = max(8, int(crop.height * scale))
+        crop = crop.resize((nw, nh), Image.LANCZOS)
+        canvas = Image.new("RGB", (224, 224), (255, 255, 255))
+        canvas.paste(crop, ((224 - nw) // 2, (224 - nh) // 2))
+        buf = io.BytesIO()
+        canvas.save(buf, format="JPEG", quality=95)
+        return buf.getvalue()
 
     def solve(self, session, referer, max_rounds=4, save_dir=None, allow_manual=True):
         """AI 优先：每题只 check 一次（同一题第二次 check 必失败并作废题目），
