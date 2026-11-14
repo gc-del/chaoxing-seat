@@ -62,7 +62,8 @@ jobs:
     env:
       TZ: Asia/Shanghai
     steps:
-      - name: 窗口判断（窗口外立即退出，不浪费 runner 与额度）
+      - name: 窗口判断（窗口外立即退出，不浪费 runner 与额度；手动触发不受此限）
+        if: github.event_name != 'workflow_dispatch'
         run: |
           H=$(TZ=Asia/Shanghai date +%H); M=$(TZ=Asia/Shanghai date +%M)
           HM=$((10#$H * 60 + 10#$M))
