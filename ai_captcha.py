@@ -121,7 +121,7 @@ class AICaptchaSolver:
 
         # 裁剪二次确认：同一字出现多个候选实例时，把每个实例单独裁剪放大再问模型
         # 「这是什么字」，用来排除"把别的字误认成目标字"的情况。
-        if self._cfg.get("ai_crop_verify", True):
+        if self._cfg.get("ai_crop_verify", False):
             for word in words:
                 items = pool[word]
                 if len(items) < 2:
