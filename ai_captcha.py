@@ -71,14 +71,20 @@ class AICaptchaSolver:
             self._log(f"[AI] 无可用后端（{providers} 均未配置 key）")
         pool = {word: [] for word in words}
         raw = ""
-        for i in range(samples):
-            prov = providers[i % len(providers)]
+        primary = providers[0]
+        backup = providers[1:]
+
+        def collect(prov):
+            """调用一次某后端，返回 (原始文本, 是否成功)"""
             try:
-                raw = ai_vision.ask_vision(self._cfg, buf.getvalue(), prompt, prov)
+                return ai_vision.ask_vision(self._cfg, buf.getvalue(), prompt, prov), True
             except Exception as e:
                 self._log(f"[AI] {prov} 调用失败: {str(e)[:80]}")
-                continue
-            for t in ai_vision.parse_targets(raw):
+                return "", False
+
+        def absorb(text):
+            """把一次返回里的候选并入投票池"""
+            for t in ai_vision.parse_targets(text):
                 for word in words:
                     if t["char"] != word:
                         continue
@@ -91,6 +97,22 @@ class AICaptchaSolver:
                             break
                     else:
                         pool[word].append([xy, 1])
+
+        primary_ok = 0
+        for _ in range(samples):
+            text, ok = collect(primary)
+            if ok:
+                primary_ok += 1
+                raw = text
+                absorb(text)
+        if primary_ok == 0 and backup:
+            # 主后端完全不可用时才启用备用（免费后端有速率限制，不能平摊调用量）
+            self._log(f"[AI] 主后端 {primary} 全部失败，切换备用后端 {backup[0]}")
+            for _ in range(samples):
+                text, ok = collect(backup[0])
+                if ok:
+                    raw = text
+                    absorb(text)
 
         if any(not pool[word] for word in words):
             return None, raw, []
