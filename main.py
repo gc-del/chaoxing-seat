@@ -35,11 +35,26 @@ from captcha_click import CaptchaError
 from chaoxing import ChaoxingClient, ChaoxingError, OFFICE
 from notify import notify as push_note
 
+try:
+    from zoneinfo import ZoneInfo
+    TZ = ZoneInfo("Asia/Shanghai")
+except Exception:
+    TZ = datetime.timezone(datetime.timedelta(hours=8))
+
+
+def now_cn():
+    """当前北京时间（服务器/云主机时区可能是 UTC，必须显式指定）"""
+    return datetime.datetime.now(TZ)
+
+
+def today_cn():
+    return now_cn().date()
+
 LOG_FILE = None
 
 
 def log(msg):
-    line = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}"
+    line = f"[{now_cn().strftime('%H:%M:%S')}] {msg}"
     print(line)
     if LOG_FILE:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
@@ -124,7 +139,7 @@ def write_config_template():
 def init_debug_dir():
     DEBUG_DIR.mkdir(exist_ok=True)
     global LOG_FILE
-    LOG_FILE = DEBUG_DIR / f"log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    LOG_FILE = DEBUG_DIR / f"log_{now_cn().strftime('%Y%m%d_%H%M%S')}.txt"
 
 
 def wait_to(target_ts):
@@ -142,12 +157,13 @@ def next_target_datetime(cfg):
     for d in days:
         if d not in WEEK_IDX:
             raise ValueError(f"days_of_week 配置无效: {d}（应使用 Monday~Sunday 英文全称）")
-    now = datetime.datetime.now()
+    now = now_cn()
     for i in range(0, 8):
         date = now.date() + datetime.timedelta(days=i)
         if days and WEEK_IDX[date.strftime("%A").lower()] not in [WEEK_IDX[d] for d in days]:
             continue
-        target = datetime.datetime.combine(date, datetime.time.fromisoformat(grab_time))
+        target = datetime.datetime.combine(date, datetime.time.fromisoformat(grab_time),
+                                          tzinfo=TZ)
         if target > now:
             return target
     raise ValueError(f"未来 8 天内找不到包含 {days} 的放座时刻")
@@ -257,7 +273,7 @@ def prepare_submit_package(client, cfg, solver, _log, day=None):
     room_id = str(cfg["room_id"])
     seat_num = str(cfg["seat_num"])
     if day is None:
-        day = datetime.date.today()
+        day = today_cn()
         if cfg.get("reserve_next_day", True):
             day += datetime.timedelta(days=1)
         day = day.isoformat()
@@ -314,7 +330,7 @@ def cmd_once(cfg, _log):
     client = ChaoxingClient(cfg["username"], cfg["password"])
     client.login()
     _log("[OK] 登录成功")
-    day = datetime.date.today()
+    day = today_cn()
     if cfg.get("reserve_next_day", True):
         day += datetime.timedelta(days=1)
     info, page = prepare_submit_package(client, cfg, solver, _log, day=day.isoformat())
@@ -414,7 +430,7 @@ def cmd_grab(cfg, _log):
             except Exception as e:
                 _log(f"实时取验证码失败({attempt}/3): {str(e)[:60]}")
                 time.sleep(2)
-    day = datetime.date.today()
+    day = today_cn()
     if cfg.get("reserve_next_day", True):
         day += datetime.timedelta(days=1)
     day = day.isoformat()
@@ -486,9 +502,9 @@ def cmd_grab(cfg, _log):
 def cmd_loop(cfg, _log):
     """常驻模式：每天到点自动抢座，用户只需启动一次，无需早起"""
     _log("[loop] 常驻模式启动：每天自动执行抢座（Ctrl+C 退出）")
-    now = datetime.datetime.now()
+    now = now_cn()
     grab_at = datetime.time.fromisoformat(cfg.get("grab_time", "07:00:00"))
-    if now > datetime.datetime.combine(now.date(), grab_at) and cfg.get("loop_backfill", True):
+    if now > datetime.datetime.combine(now.date(), grab_at, tzinfo=TZ) and cfg.get("loop_backfill", True):
         _log("[loop] 今日放座时刻已过，先立即补抢一次今天的座位")
         try:
             cmd_once(cfg, _log)
@@ -501,7 +517,7 @@ def cmd_loop(cfg, _log):
             _log(f"[loop] 本轮异常: {e}")
         except Exception as e:
             _log(f"[loop] 本轮未处理异常: {e}")
-        now = datetime.datetime.now()
+        now = now_cn()
         nxt = (now + datetime.timedelta(days=1)).replace(
             hour=int(cfg.get("loop_start_hour", 6)), minute=30, second=0, microsecond=0)
         if nxt <= now:
