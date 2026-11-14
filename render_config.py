@@ -49,7 +49,7 @@ def build_config():
         "max_submit_attempts": env_int("CX_MAX_ATTEMPTS", 3),
         "captcha_mode": env("CX_CAPTCHA_MODE", "ai"),
         "ai_vision_provider": env("AI_PROVIDER", "deepseek"),
-        "ai_providers": env("AI_PROVIDERS", "deepseek"),
+        "ai_providers": env("AI_PROVIDERS", "deepseek,glm"),
         "ai_samples": env_int("AI_SAMPLES", 3),
         "ai_image_scale": env_int("AI_IMAGE_SCALE", 3),
         "ai_thinking": env("AI_THINKING", "disabled"),
