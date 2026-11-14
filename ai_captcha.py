@@ -134,7 +134,8 @@ class AICaptchaSolver:
                         continue
                     try:
                         reply = ai_vision.ask_vision(self._cfg, crop,
-                                                     ai_vision.build_char_prompt(), primary)
+                                                     ai_vision.build_char_prompt(), primary,
+                                                     json_mode=False)
                         got = ai_vision.parse_char(reply)
                     except Exception as e:
                         self._log(f"[AI] 裁剪确认失败: {str(e)[:60]}")
