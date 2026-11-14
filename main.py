@@ -374,7 +374,7 @@ def cmd_grab(cfg, _log):
         target = next_target_datetime(cfg)
         _log(f"目标放座时刻: {target.isoformat()}（本机时间）")
         # 距放座时刻过久则不空等（schedule 冗余触发时快速退出，省 Actions 额度）
-        max_wait = int(cfg.get("max_wait_minutes") or 25) * 60
+        max_wait = int(cfg.get("max_wait_minutes") or 90) * 60
         if target.timestamp() - now_cn().timestamp() > max_wait:
             _log(f"距放座时刻还有 {(target.timestamp() - now_cn().timestamp()) / 60:.0f} 分钟，"
                  f"超过等待上限 {max_wait // 60} 分钟，本轮跳过")
