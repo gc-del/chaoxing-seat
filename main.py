@@ -360,8 +360,25 @@ def cmd_grab(cfg, _log):
         _log("!!DRY_RUN 演练模式：不会发出任何预约请求，仅演练流程!!")
     max_attempts = int(cfg.get("max_submit_attempts") or 3)
 
-    target = next_target_datetime(cfg)
-    _log(f"目标放座时刻: {target.isoformat()}（本机时间）")
+    # 补抢模式：定时触发延迟到放座时刻之后，但当天 12:00 之前仍可预约当天时段，
+    # 此时立即执行一次抢座（不等待 07:00）
+    now = now_cn()
+    gh, gm = (int(x) for x in cfg["grab_time"].split(":")[:2])
+    open_at = datetime.datetime.combine(now.date(), datetime.time(gh, gm), tzinfo=TZ)
+    catchup_until = open_at + datetime.timedelta(hours=float(cfg.get("catchup_hours") or 4))
+    if open_at <= now < catchup_until:
+        target = now
+        _log(f"补抢模式：现在 {now.strftime('%H:%M')}，"
+             f"{catchup_until.strftime('%H:%M')} 前仍可约当天时段 → 立即执行")
+    else:
+        target = next_target_datetime(cfg)
+        _log(f"目标放座时刻: {target.isoformat()}（本机时间）")
+        # 距放座时刻过久则不空等（schedule 冗余触发时快速退出，省 Actions 额度）
+        max_wait = int(cfg.get("max_wait_minutes") or 25) * 60
+        if target.timestamp() - now_cn().timestamp() > max_wait:
+            _log(f"距放座时刻还有 {(target.timestamp() - now_cn().timestamp()) / 60:.0f} 分钟，"
+                 f"超过等待上限 {max_wait // 60} 分钟，本轮跳过")
+            return 1
 
     solver = make_solver(cfg, _log)
     solver.preload_models()
