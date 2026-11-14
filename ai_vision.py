@@ -141,10 +141,11 @@ def call_openai_vision(base_url, api_key, model, image_bytes, prompt,
 
 
 def call_deepseek(api_key, image_bytes, prompt, model="deepseek-flash",
-                  thinking="disabled", effort=None):
+                  thinking="disabled", effort=None, json_mode=True):
     """DeepSeek V4.1 Flash（原生多模态，国内直连），OpenAI 兼容格式
 
     thinking: off=关闭思考(最快) / low=低强度思考(更准) / high=完整思考
+    json_mode=False 时不强制 JSON 输出（单字识别等纯文本任务必须关闭，否则 400）
     """
     b64 = base64.b64encode(image_bytes).decode()
     payload = {
@@ -158,8 +159,9 @@ def call_deepseek(api_key, image_bytes, prompt, model="deepseek-flash",
                                "detail": "original"}},
             ],
         }],
-        "response_format": {"type": "json_object"},
     }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
     if thinking in ("on", "enabled", "low", "high", "max"):
         payload["thinking"] = {"type": "enabled"}
         payload["reasoning_effort"] = effort or thinking
@@ -257,7 +259,7 @@ def provider_ready(cfg, provider):
     return bool((cfg.get(field) or "").strip())
 
 
-def ask_vision(cfg, image_bytes, prompt, provider=None):
+def ask_vision(cfg, image_bytes, prompt, provider=None, json_mode=True):
     """按 config.ai_vision_provider 选择后端，返回模型文本输出
 
     provider 为空时读 ai_vision_provider；指定时强制走该后端
@@ -268,7 +270,8 @@ def ask_vision(cfg, image_bytes, prompt, provider=None):
         return call_deepseek(cfg.get("deepseek_api_key"), image_bytes, prompt,
                              cfg.get("deepseek_model") or "deepseek-flash",
                              cfg.get("ai_thinking") or "disabled",
-                             cfg.get("ai_reasoning_effort") or None)
+                             cfg.get("ai_reasoning_effort") or None,
+                             json_mode=json_mode)
     if provider == "qwen":
         return call_openai_vision(
             "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
