@@ -110,7 +110,7 @@ CONFIG_TEMPLATE = {
     "gemini_proxy": "",
     "ai_image_scale": 3,
     "captcha_test_rounds": 3,
-    "captcha_max_rounds": 4,
+    "captcha_max_rounds": 6,
     "pre_brush_fails": 3,
     "loop_start_hour": 6,
     "loop_backfill": True,
@@ -297,7 +297,7 @@ def prepare_submit_package(client, cfg, solver, _log, day=None):
     from captcha_click import new_session
     validate = solver.solve(new_session(),
                             referer=f"{OFFICE}/front/third/apps/seat/select",
-                            max_rounds=int(cfg.get("captcha_max_rounds") or 4),
+                            max_rounds=int(cfg.get("captcha_max_rounds") or 6),
                             save_dir=DEBUG_DIR, allow_manual=False)
     info = client.build_submit(
         room_id=room_id, seat_num=seat_num, day=day,
@@ -422,7 +422,7 @@ def cmd_grab(cfg, _log):
             from captcha_click import new_session
             validate = solver.solve(new_session(),
                                     referer=f"{OFFICE}/front/third/apps/seat/select",
-                                    max_rounds=int(cfg.get("captcha_max_rounds") or 10),
+                                    max_rounds=int(cfg.get("captcha_max_rounds") or 6),
                                     save_dir=DEBUG_DIR, allow_manual=False)
             _log(f"[OK] 验证码通过: {str(validate)[:40]}...")
             break
