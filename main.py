@@ -12,6 +12,7 @@
   python main.py loop           常驻模式：每天自动抢座，启动一次即可（无人值守）
 """
 import json
+import os
 import random
 import sys
 import time
@@ -373,18 +374,34 @@ def cmd_grab(cfg, _log):
         _log("!!DRY_RUN 演练模式：不会发出任何预约请求，仅演练流程!!")
     max_attempts = int(cfg.get("max_submit_attempts") or 3)
 
-    # 补抢模式：定时触发延迟到放座时刻之后，但当天 12:00 之前仍可预约当天时段，
-    # 此时立即执行一次抢座（不等待 07:00）
+    # 补抢模式：定时触发延迟到放座时刻之后，只要还没到"开始时段"就仍可预约当天时段，
+    # 此时立即执行一次抢座（不等待 07:00）。
+    # 手动触发（FORCE_IMMEDIATE=1）则无论几点都立即执行一次。
     now = now_cn()
+    _log(f"时区自检: 北京 {now.strftime('%Y-%m-%d %H:%M:%S')} | "
+         f"UTC {now.astimezone(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} | "
+         f"本机 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    immediate = str(os.environ.get("FORCE_IMMEDIATE", "")).strip().lower() in ("1", "true", "yes", "on")
     gh, gm = (int(x) for x in cfg["grab_time"].split(":")[:2])
     open_at = datetime.datetime.combine(now.date(), datetime.time(gh, gm), tzinfo=TZ)
-    catchup_until = open_at + datetime.timedelta(hours=float(cfg.get("catchup_hours") or 4))
-    if open_at <= now < catchup_until:
+    # 超星规则：开始时段必须 ≥ 当前时间，故补抢窗口到"开始时段"开始前为止
+    sh, sm = (int(x) for x in cfg["start_time"].split(":")[:2])
+    start_at = datetime.datetime.combine(now.date(), datetime.time(sh, sm), tzinfo=TZ)
+    if start_at <= now:
+        start_at += datetime.timedelta(days=1)
+    catchup_until = max(start_at, open_at + datetime.timedelta(hours=1))
+    if immediate:
         target = now
+        run_now = True
+        _log(f"手动触发 → 立即执行一次（{now.strftime('%H:%M:%S')}）")
+    elif open_at <= now < catchup_until:
+        target = now
+        run_now = True
         _log(f"补抢模式：现在 {now.strftime('%H:%M')}，"
              f"{catchup_until.strftime('%H:%M')} 前仍可约当天时段 → 立即执行")
     else:
         target = next_target_datetime(cfg)
+        run_now = False
         _log(f"目标放座时刻: {target.isoformat()}（本机时间）")
         # 距放座时刻过久则不空等（schedule 冗余触发时快速退出，省 Actions 额度）
         max_wait = int(cfg.get("max_wait_minutes") or 90) * 60
@@ -401,7 +418,7 @@ def cmd_grab(cfg, _log):
     wait_to(target.timestamp() - login_lead)
     _log(f"开始提前登录（放座前 {login_lead // 60} 分钟）...")
     while True:
-        if time.time() > target.timestamp() - 20:
+        if not run_now and time.time() > target.timestamp() - 20:
             _log("登录窗口已贻误，放弃本轮")
             return 1
         try:
