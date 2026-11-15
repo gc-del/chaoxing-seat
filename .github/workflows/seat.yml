@@ -62,6 +62,12 @@ jobs:
           fi
           echo "今日($TODAY)尚未处理，继续"
 
+      - name: 时区自检（一眼看清程序在哪个时刻跑）
+        run: |
+          echo "UTC:        $(date -u '+%F %T %Z')"
+          echo "Shanghai:  $(TZ=Asia/Shanghai date '+%F %T %Z')"
+          echo "Runner本地: $(date '+%F %T %Z')"
+
       - name: 设置时区（代码层已固定北京时间，这里只是兜底）
         run: sudo timedatectl set-timezone Asia/Shanghai || true
 
@@ -93,6 +99,7 @@ jobs:
       - name: 执行（dryrun 只组装请求包不提交）
         env:
           MODE: ${{ inputs.mode }}
+          FORCE_IMMEDIATE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
         run: |
           case "$MODE" in
             dryrun)  python -u main.py dryrun ;;
