@@ -35,7 +35,8 @@ jobs:
     timeout-minutes: 110
     concurrency:
       group: grab
-      cancel-in-progress: false
+      cancel-in-progress: false   # 绝不能取消正在提交的 run（07:00 正是提交时刻，心跳/cron 会同时触发）
+                                   # 重复消耗由"解码前复查今日标记"来抑制
     env:
       TZ: Asia/Shanghai
     steps:
@@ -115,9 +116,9 @@ jobs:
           if [ -f "done_${TODAY}.txt" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git pull --rebase origin main || true
             git add "done_${TODAY}.txt" || true
             git commit -m "done ${TODAY}: $(cat done_${TODAY}.txt)" || true
-            git pull --rebase origin main || true
             git push || echo "标记提交失败（下一轮 run 会重试）"
           fi
 
