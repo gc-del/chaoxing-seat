@@ -46,6 +46,8 @@ def build_config():
         "reserve_next_day": env_bool("CX_RESERVE_NEXT_DAY", False),
         "days_of_week": [d.strip() for d in (env("CX_DAYS", "") or "").split(",") if d.strip()],
         "max_submit_attempts": env_int("CX_MAX_ATTEMPTS", 3),
+        "seat_fallback": env("SEAT_FALLBACK", "near"),
+        "seat_fallback_count": env_int("SEAT_FALLBACK_COUNT", 6),
         "captcha_mode": env("CX_CAPTCHA_MODE", "ai"),
         "ai_vision_provider": env("AI_PROVIDER", "deepseek"),
         "ai_providers": env("AI_PROVIDERS", "deepseek,glm"),
