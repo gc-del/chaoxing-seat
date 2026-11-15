@@ -155,14 +155,24 @@ def wait_to(target_ts):
 
 
 def write_done_flag(status, note=""):
-    """写入今日完成标记（Actions 后续 run 读到即作废，避免重复消耗与重复提交）"""
+    """写入今日完成标记（Actions 后续 run 读到即作废，避免重复消耗与重复提交）
+
+    已存在标记时不覆盖：多个并发 run 竞争时，保留第一个写入的结果。
+    """
     day = today_cn().isoformat()
     path = BASE_DIR / f"done_{day}.txt"
+    if path.exists():
+        return path
     try:
         path.write_text(f"{status} {note}".strip(), encoding="utf-8")
     except Exception:
         return None
     return path
+
+
+def done_flag_exists():
+    """今日是否已处理（成功或放弃）——用于 run 排队醒来后的二次检查"""
+    return (BASE_DIR / f"done_{today_cn().isoformat()}.txt").exists()
 
 
 SEAT_ISSUE_KEYWORDS = ("已被占", "已被预约", "已占用", "座位已满", "座位不存在",
@@ -406,7 +416,7 @@ def cmd_once(cfg, _log):
         return 0
     beep(False)
     push_note(cfg, "预约未成功", f"服务端响应: {str(resp)[:120]}")
-    write_done_flag("fail", "手动补抢未成功")
+    # 手动补抢失败不写标记：不应影响当天的自动流程（否则自动流程会被误作废）
     return 1
 
 
@@ -478,14 +488,19 @@ def cmd_grab(cfg, _log):
     # 到点才解题：validate 只保 5 分钟，提前解出来到提交时已过期作废，
     # 还会白耗失败次数（风控累积），所以不做提前预刷。
     wait_to(target.timestamp() - 3)
-    _log("到点，开始解题（最多 10 题）...")
+    # 排队等待的 run 醒来后先复查标记：今天的活可能已被别的 run 干完了
+    if done_flag_exists():
+        _log("今日已由其它运行处理完毕，本轮作废")
+        return 1
+    cap_rounds = int(cfg.get("captcha_max_rounds") or 6)
+    _log(f"到点，开始解题（最多 {cap_rounds} 题）...")
     validate = None
     for attempt in range(1, 4):
         try:
             from captcha_click import new_session
             validate = solver.solve(new_session(),
                                     referer=f"{OFFICE}/front/third/apps/seat/select",
-                                    max_rounds=int(cfg.get("captcha_max_rounds") or 6),
+                                    max_rounds=cap_rounds,
                                     save_dir=DEBUG_DIR, allow_manual=False)
             _log(f"[OK] 验证码通过: {str(validate)[:40]}...")
             break
@@ -500,6 +515,13 @@ def cmd_grab(cfg, _log):
     if cfg.get("reserve_next_day", True):
         day += datetime.timedelta(days=1)
     day = day.isoformat()
+    if not validate:
+        # 验证码没拿到就不再用空 captcha 去提交（必被拒，还可能累积风控）
+        _log("!!未能取得验证码，本轮放弃提交")
+        write_done_flag("fail", "验证码未通过（达到题数上限）")
+        beep(False)
+        push_note(cfg, "抢座未成功", "验证码未能通过，已放弃本轮")
+        return 1
     page = None
     try:
         page = client.fetch_seat_page(cfg["room_id"], cfg["seat_num"])
