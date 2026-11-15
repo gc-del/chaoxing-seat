@@ -12,6 +12,11 @@ on:
       timezone: "Asia/Shanghai"
     - cron: "55 6 * * *"
       timezone: "Asia/Shanghai"
+    # 07:05 / 07:15 兜底：若 07:00 那次失败，走补抢模式立即再试（12:00 前都合法）
+    - cron: "5 7 * * *"
+      timezone: "Asia/Shanghai"
+    - cron: "15 7 * * *"
+      timezone: "Asia/Shanghai"
   push:
     branches: [main]
   workflow_dispatch:
