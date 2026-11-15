@@ -89,6 +89,8 @@ CONFIG_TEMPLATE = {
     "dept_id_enc": "",
     "use_dept_id_enc": True,
     "max_submit_attempts": 3,
+    "seat_fallback": "near",
+    "seat_fallback_count": 6,
     "captcha_mode": "ai",
     "ai_vision_provider": "deepseek",
     "ai_providers": "deepseek",
@@ -161,6 +163,50 @@ def write_done_flag(status, note=""):
     except Exception:
         return None
     return path
+
+
+SEAT_ISSUE_KEYWORDS = ("已被占", "已被预约", "已占用", "座位已满", "座位不存在",
+                        "已被别人")
+
+
+def build_seat_candidates(cfg):
+    """座位候选序列：目标座位优先，其后就近扩展（192 → 191/193 → 190/194 …）
+
+    seat_fallback: "near"=就近扩展 / "none"=不换座 / "193,191"=自定义顺序
+    seat_fallback_count: 就近扩展时前后各取几个（默认 6）
+    """
+    base = str(cfg.get("seat_num") or "").strip()
+    if not base:
+        return []
+    mode = str(cfg.get("seat_fallback") or "near").strip()
+    if mode.lower() in ("", "none", "off", "0"):
+        return [base]
+    if mode.lower() != "near":
+        items = [s.strip() for s in mode.split(",") if s.strip()]
+        return items if base in items else [base] + items
+    try:
+        n = int(base)
+    except ValueError:
+        return [base]
+    span = int(cfg.get("seat_fallback_count") or 6)
+    out = [base]
+    for d in range(1, span + 1):
+        if n - d > 0:
+            out.append(str(n - d))
+        out.append(str(n + d))
+    return out
+
+
+def is_seat_issue(msg):
+    """服务端是否提示座位不可用（被占/不存在等）
+
+    注意排除"时间段已过"这类时间问题——那不是座位问题，换座也没用。
+    """
+    if not msg:
+        return False
+    if "时段" in msg or "时间段" in msg or "时间" in msg:
+        return False
+    return any(k in msg for k in SEAT_ISSUE_KEYWORDS)
 
 
 def next_target_datetime(cfg):
@@ -479,20 +525,52 @@ def cmd_grab(cfg, _log):
         beep(True)
         return 0
 
-    for attempt in range(1, max_attempts + 1):
+    # 座位候选：目标座位优先，其后是"就近"扩展（192 → 191/193 → 190/194 …）
+    seats = build_seat_candidates(cfg)
+    seat_idx = 0
+    current_seat = seats[0]
+    seat_tries = 0
+
+    submit_try = 0
+    while True:
         resp = client.submit(info)
         if resp.get("success"):
-            _log("[OK][OK][OK] 抢座成功! 座位信息见图书馆。")
+            _log(f"[OK][OK][OK] 抢座成功! 座位 {current_seat}（房间 {cfg['room_id']}）")
             beep(True)
             push_note(cfg, "抢座成功",
-                      f"房间 {cfg['room_id']} 座位 {cfg['seat_num']} "
+                      f"房间 {cfg['room_id']} 座位 {current_seat} "
                       f"{cfg['start_time']}-{cfg['end_time']} 日期 {info['day']}")
-            write_done_flag("ok", f"seat={cfg['seat_num']} {info['day']}")
+            write_done_flag("ok", f"seat={current_seat} {info['day']}")
             return 0
-        _log(f"第 {attempt} 次提交失败: {str(resp)[:200]}")
-        if attempt >= max_attempts:
-            break
         msg = str(resp)
+
+        # 座位被占 / 不可用 → 换到相邻座位重试（每次换座需重取该座位的盐值）
+        # 换座不计入普通重试次数（submit_try），换座候选用尽才回到普通重试逻辑
+        if is_seat_issue(msg) and seat_idx + 1 < len(seats):
+            nxt = seats[seat_idx + 1]
+            seat_idx += 1
+            seat_tries += 1
+            _log(f"座位 {current_seat} 不可用 → 改用相邻座位 {nxt}（第 {seat_tries} 次换座）")
+            try:
+                npage = client.fetch_seat_page(cfg["room_id"], nxt)
+            except Exception as e:
+                _log(f"取座位 {nxt} 页面失败: {str(e)[:80]}，继续下一个候选")
+                continue
+            if not npage.get("enc_salt"):
+                _log(f"座位 {nxt} 无有效盐值（可能不存在），继续下一个候选")
+                continue
+            current_seat = nxt
+            info = client.build_submit(
+                room_id=cfg["room_id"], seat_num=nxt, day=day,
+                start=cfg["start_time"], end=cfg["end_time"],
+                captcha=validate or "", enc_salt=npage["enc_salt"],
+            )
+            continue
+
+        submit_try += 1
+        _log(f"第 {submit_try} 次提交失败: {str(resp)[:200]}")
+        if submit_try >= max_attempts:
+            break
         if "验证" in msg or "token" in msg.lower() or validate is None:
             _log("疑似验证码/凭证问题 → 重新实时取验证码与座位页盐值...")
             try:
@@ -501,9 +579,9 @@ def cmd_grab(cfg, _log):
                                             referer=f"{OFFICE}/front/third/apps/seat/select",
                                             max_rounds=3,
                                             save_dir=DEBUG_DIR, allow_manual=False)
-                page = client.fetch_seat_page(cfg["room_id"], cfg["seat_num"])
+                page = client.fetch_seat_page(cfg["room_id"], current_seat)
                 info = client.build_submit(
-                    room_id=cfg["room_id"], seat_num=cfg["seat_num"], day=day,
+                    room_id=cfg["room_id"], seat_num=current_seat, day=day,
                     start=cfg["start_time"], end=cfg["end_time"],
                     captcha=new_validate, enc_salt=page["enc_salt"],
                 )
@@ -516,7 +594,7 @@ def cmd_grab(cfg, _log):
             time.sleep(random.uniform(2.0, 4.0))
     _log("本轮抢座结束(未成功)。日志已存 debug_median。")
     beep(False)
-    push_note(cfg, "抢座未成功", f"房间 {cfg['room_id']} 座位 {cfg['seat_num']}，详见日志")
+    push_note(cfg, "抢座未成功", f"房间 {cfg['room_id']} 座位 {current_seat}，详见日志")
     write_done_flag("fail", "今日已放弃（达到重试上限）")
     return 1
 
