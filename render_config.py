@@ -55,7 +55,7 @@ def build_config():
         "ai_crop_verify": env_bool("AI_CROP_VERIFY", False),
         "ai_max_rounds": env_int("AI_MAX_ROUNDS", 2),
         "ai_pre_rounds": env_int("AI_PRE_ROUNDS", 12),
-        "captcha_max_rounds": env_int("CAPTCHA_MAX_ROUNDS", 10),
+        "captcha_max_rounds": env_int("CAPTCHA_MAX_ROUNDS", 6),
         "pre_brush_fails": env_int("PRE_BRUSH_FAILS", 3),
         "login_lead_minutes": env_int("LOGIN_LEAD_MINUTES", 10),
         "pre_brush_lead_minutes": env_int("PRE_BRUSH_LEAD_MINUTES", 9),
