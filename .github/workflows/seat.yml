@@ -104,7 +104,7 @@ jobs:
 
       - name: 执行（dryrun 只组装请求包不提交）
         env:
-          MODE: ${{ inputs.mode }}
+          MODE: ${{ inputs.mode || 'grab' }}
           FORCE_IMMEDIATE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
         run: |
           case "$MODE" in
