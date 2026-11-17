@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "运行模式（定时触发时忽略此项）"
+        description: "运行模式（定时/心跳触发时忽略此项）"
         required: true
         default: "dryrun"
         type: choice
@@ -30,6 +30,14 @@ on:
           - dryrun
           - diagnose
           - grab
+      force:
+        description: "yes=立即执行一次（手动补抢用；心跳 dispatch 不传此项）"
+        required: false
+        default: "no"
+        type: choice
+        options:
+          - "no"
+          - "yes"
 
 permissions:
   contents: write
@@ -45,48 +53,52 @@ jobs:
     env:
       TZ: Asia/Shanghai
     steps:
-      - name: 窗口判断（窗口外立即退出，不浪费 runner 与额度；手动触发不受此限）
-        if: github.event_name != 'workflow_dispatch'
-        run: |
-          H=$(TZ=Asia/Shanghai date +%H); M=$(TZ=Asia/Shanghai date +%M)
-          HM=$((10#$H * 60 + 10#$M))
-          echo "北京时间 $(TZ=Asia/Shanghai date '+%F %T')"
-          if [ "$HM" -lt 390 ] || [ "$HM" -gt 690 ]; then
-            echo "不在抢座窗口（06:30-11:30），跳过本轮"
-            exit 0
-          fi
-
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 今日是否已处理（成功或放弃都写标记，避免重复消耗与重复提交）
+      - name: 预检（窗口外/今日已处理则跳过后续全部步骤；手动触发不受此限）
+        id: precheck
+        if: github.event_name != 'workflow_dispatch'
         run: |
+          echo "北京时间 $(TZ=Asia/Shanghai date '+%F %T')"
+          HM=$(( (10#$(TZ=Asia/Shanghai date +%H)) * 60 + 10#$(TZ=Asia/Shanghai date +%M) ))
+          if [ "$HM" -lt 390 ] || [ "$HM" -gt 690 ]; then
+            echo "不在抢座窗口（06:30-11:30），跳过本轮"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           TODAY=$(TZ=Asia/Shanghai date +%F)
           if [ -f "done_${TODAY}.txt" ]; then
             echo "今日($TODAY)已处理：$(cat done_${TODAY}.txt) → 本轮作废"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "今日($TODAY)尚未处理，继续"
+          echo "skip=0" >> "$GITHUB_OUTPUT"
 
       - name: 时区自检（一眼看清程序在哪个时刻跑）
+        if: steps.precheck.outputs.skip != '1'
         run: |
           echo "UTC:        $(date -u '+%F %T %Z')"
           echo "Shanghai:  $(TZ=Asia/Shanghai date '+%F %T %Z')"
           echo "Runner本地: $(date '+%F %T %Z')"
 
       - name: 设置时区（代码层已固定北京时间，这里只是兜底）
+        if: steps.precheck.outputs.skip != '1'
         run: sudo timedatectl set-timezone Asia/Shanghai || true
 
       - name: 准备 Python
+        if: steps.precheck.outputs.skip != '1'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: 安装依赖
+        if: steps.precheck.outputs.skip != '1'
         run: |
           python -m pip install --disable-pip-version-check --quiet requests Pillow cryptography
 
       - name: 生成配置
+        if: steps.precheck.outputs.skip != '1'
         env:
           CX_USER: ${{ secrets.CX_USER }}
           CX_PASS: ${{ secrets.CX_PASS }}
@@ -103,9 +115,12 @@ jobs:
         run: python render_config.py
 
       - name: 执行（dryrun 只组装请求包不提交）
+        if: steps.precheck.outputs.skip != '1'
         env:
           MODE: ${{ inputs.mode || 'grab' }}
-          FORCE_IMMEDIATE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+          # 只有手动触发且明确选择 force=yes 才立即执行；心跳 dispatch 不传 force，
+          # 走正常时间逻辑（06:30-07:00 启动的 run 会等到 07:00 准点解题）
+          FORCE_IMMEDIATE: ${{ (github.event_name == 'workflow_dispatch' && inputs.force == 'yes') && '1' || '' }}
         run: |
           case "$MODE" in
             dryrun)  python -u main.py dryrun ;;
@@ -115,7 +130,7 @@ jobs:
           esac
 
       - name: 提交今日标记（供后续 run 作废判断）
-        if: always()
+        if: (!cancelled()) && steps.precheck.outputs.skip != '1'
         run: |
           TODAY=$(TZ=Asia/Shanghai date +%F)
           if [ -f "done_${TODAY}.txt" ]; then
@@ -128,7 +143,7 @@ jobs:
           fi
 
       - name: 结果摘要（手机上 GitHub App 也能直接看）
-        if: always()
+        if: (!cancelled()) && steps.precheck.outputs.skip != '1'
         run: |
           echo "## 抢座任务结果" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -136,7 +151,7 @@ jobs:
             || echo "(无日志产出)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: 上传日志
-        if: always()
+        if: (!cancelled()) && steps.precheck.outputs.skip != '1'
         uses: actions/upload-artifact@v4
         with:
           name: grab-logs
