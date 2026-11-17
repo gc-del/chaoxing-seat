@@ -47,7 +47,7 @@ jobs:
           done
           # 接力：拉起新心跳，避免本轮超时后链断
           for t in 1 2 3 4 5; do
-            if gh workflow run heartbeat.yml -R gc-del/chaoxing-seat; then
+            if gh workflow run seat-heartbeat -R gc-del/chaoxing-seat; then
               echo "已 dispatch 心跳接力"
               break
             fi
