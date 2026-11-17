@@ -31,17 +31,20 @@ jobs:
       - name: 心跳循环（dispatch 唤醒 seat-grab，只在抢座窗口附近发车）
         run: |
           set -u
+          DISPATCHED=0
           for i in $(seq 1 33); do             # 33 × 10 分钟 ≈ 5.5 小时一轮
             BJ_HM=$((10#$(TZ=Asia/Shanghai date +%H%M)))
-            if [ "$BJ_HM" -ge 620 ] && [ "$BJ_HM" -le 720 ]; then
-              # 北京 06:20–07:20 才 dispatch（窗口外拉起的 grab run 只会白跑）
+            if [ "$BJ_HM" -ge 631 ] && [ "$BJ_HM" -le 700 ] && [ "$DISPATCHED" -eq 0 ]; then
+              # 北京 06:31–07:00 只发一次车：单 run 单次 6 题机会（符合"失败即放弃当天"）；
+              # dispatch 失败才在下一轮重试（窗口 30 分钟 > 轮询间隔 10 分钟，必然覆盖）
               if gh workflow run seat.yml -f mode=grab -R gc-del/chaoxing-seat; then
-                echo "已 dispatch seat-grab（北京 $(TZ=Asia/Shanghai date '+%F %T')）"
+                DISPATCHED=1
+                echo "已 dispatch seat-grab（北京 $(TZ=Asia/Shanghai date '+%F %T')），本轮不再重复发车"
               else
                 echo "dispatch 失败（API 暂时不可用，下一轮重试）"
               fi
             else
-              echo "北京 $(TZ=Asia/Shanghai date '+%F %T') 不在发车窗口（06:20-07:20），等待下一轮"
+              echo "北京 $(TZ=Asia/Shanghai date '+%F %T') 不在发车窗口/已发车，等待下一轮"
             fi
             sleep 600
           done
