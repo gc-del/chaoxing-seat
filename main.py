@@ -438,6 +438,11 @@ def cmd_grab(cfg, _log):
          f"UTC {now.astimezone(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} | "
          f"本机 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
     immediate = str(os.environ.get("FORCE_IMMEDIATE", "")).strip().lower() in ("1", "true", "yes", "on")
+    # 标记检查提前到登录之前：心跳全天候拉起的 run 在标记存在时秒退，
+    # 避免每 10 分钟一次真实登录触发风控。
+    if not immediate and done_flag_exists():
+        _log("今日已处理完毕，本轮作废（秒退，不登录）")
+        return 0
     gh, gm = (int(x) for x in cfg["grab_time"].split(":")[:2])
     open_at = datetime.datetime.combine(now.date(), datetime.time(gh, gm), tzinfo=TZ)
     # 超星规则：开始时段必须 ≥ 当前时间，故补抢窗口到"开始时段"开始前为止
@@ -491,7 +496,7 @@ def cmd_grab(cfg, _log):
     # 排队等待的 run 醒来后先复查标记：今天的活可能已被别的 run 干完了
     if done_flag_exists():
         _log("今日已由其它运行处理完毕，本轮作废")
-        return 1
+        return 0
     cap_rounds = int(cfg.get("captcha_max_rounds") or 6)
     _log(f"到点，开始解题（最多 {cap_rounds} 题）...")
     validate = None
@@ -518,7 +523,9 @@ def cmd_grab(cfg, _log):
     if not validate:
         # 验证码没拿到就不再用空 captcha 去提交（必被拒，还可能累积风控）
         _log("!!未能取得验证码，本轮放弃提交")
-        write_done_flag("fail", "验证码未通过（达到题数上限）")
+        if not immediate:
+            # 手动补抢失败不写标记：不应影响当天的自动流程
+            write_done_flag("fail", "验证码未通过（达到题数上限）")
         beep(False)
         push_note(cfg, "抢座未成功", "验证码未能通过，已放弃本轮")
         return 1
@@ -545,6 +552,11 @@ def cmd_grab(cfg, _log):
         _log("[演练] 到点命中。完整请求参数如下（未发送）:")
         _log("&".join(f"{k}={v}" for k, v in info.items()))
         beep(True)
+        return 0
+
+    # 提交前最后复查：并行 run 可能已成功提交并写了标记（防重复预约与误换座）
+    if done_flag_exists():
+        _log("提交前复查：今日已由其它运行处理完毕，本轮不提交")
         return 0
 
     # 座位候选：目标座位优先，其后是"就近"扩展（192 → 191/193 → 190/194 …）
@@ -617,7 +629,9 @@ def cmd_grab(cfg, _log):
     _log("本轮抢座结束(未成功)。日志已存 debug_median。")
     beep(False)
     push_note(cfg, "抢座未成功", f"房间 {cfg['room_id']} 座位 {current_seat}，详见日志")
-    write_done_flag("fail", "今日已放弃（达到重试上限）")
+    if not immediate:
+        # 手动补抢失败不写标记：不应影响当天的自动流程
+        write_done_flag("fail", "今日已放弃（达到重试上限）")
     return 1
 
 
