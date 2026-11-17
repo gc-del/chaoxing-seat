@@ -581,6 +581,10 @@ def cmd_grab(cfg, _log):
         # 座位被占 / 不可用 → 换到相邻座位重试（每次换座需重取该座位的盐值）
         # 换座不计入普通重试次数（submit_try），换座候选用尽才回到普通重试逻辑
         if is_seat_issue(msg) and seat_idx + 1 < len(seats):
+            # 换座前复查标记：并行 run 可能刚刚抢成功（本 run 的提交被"已预约"拒绝）
+            if done_flag_exists():
+                _log("换座前复查：今日已由其它运行抢到，本轮停止换座")
+                return 0
             nxt = seats[seat_idx + 1]
             seat_idx += 1
             seat_tries += 1
