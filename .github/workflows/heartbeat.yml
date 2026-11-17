@@ -40,6 +40,8 @@ jobs:
               else
                 echo "dispatch 失败（API 暂时不可用，下一轮重试）"
               fi
+            else
+              echo "北京 $(TZ=Asia/Shanghai date '+%F %T') 不在发车窗口（06:20-07:20），等待下一轮"
             fi
             sleep 600
           done
