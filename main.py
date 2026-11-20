@@ -21,6 +21,9 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 DEBUG_DIR = BASE_DIR / "debug_median"
+# 多账号支持：第二个 job 通过环境变量指定独立配置与独立标记（done_/done2_）
+CONFIG_FILE = (os.environ.get("CONFIG_FILE") or "config.json").strip() or "config.json"
+DONE_FLAG_PREFIX = (os.environ.get("DONE_FLAG_PREFIX") or "done").strip() or "done"
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -125,7 +128,7 @@ CONFIG_TEMPLATE = {
 
 
 def load_config():
-    path = BASE_DIR / "config.json"
+    path = BASE_DIR / CONFIG_FILE
     if not path.exists():
         write_config_template()
         print("尚未创建 config.json，已为你生成模板并退出。请填写后重试。")
@@ -154,13 +157,17 @@ def wait_to(target_ts):
         time.sleep(min(remain, 30))
 
 
+def done_flag_path():
+    """当日标记路径（第二账号用 DONE_FLAG_PREFIX=done2，与主账号互不干扰）"""
+    return BASE_DIR / f"{DONE_FLAG_PREFIX}_{today_cn().isoformat()}.txt"
+
+
 def write_done_flag(status, note=""):
     """写入今日完成标记（Actions 后续 run 读到即作废，避免重复消耗与重复提交）
 
     已存在标记时不覆盖：多个并发 run 竞争时，保留第一个写入的结果。
     """
-    day = today_cn().isoformat()
-    path = BASE_DIR / f"done_{day}.txt"
+    path = done_flag_path()
     if path.exists():
         return path
     try:
@@ -172,7 +179,7 @@ def write_done_flag(status, note=""):
 
 def done_flag_exists():
     """今日是否已处理（成功或放弃）——用于 run 排队醒来后的二次检查"""
-    return (BASE_DIR / f"done_{today_cn().isoformat()}.txt").exists()
+    return done_flag_path().exists()
 
 
 SEAT_ISSUE_KEYWORDS = ("已被占", "已被预约", "已占用", "座位已满", "座位不存在",
