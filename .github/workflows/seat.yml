@@ -136,10 +136,14 @@ jobs:
           if [ -f "done_${TODAY}.txt" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git pull --rebase origin main || true
-            git add "done_${TODAY}.txt" || true
-            git commit -m "done ${TODAY}: $(cat done_${TODAY}.txt)" || true
-            git push || echo "标记提交失败（下一轮 run 会重试）"
+            for i in 1 2 3; do
+              git pull --rebase origin main || true
+              git add "done_${TODAY}.txt" || true
+              git commit -m "done ${TODAY}: $(cat done_${TODAY}.txt)" || true
+              if git push; then echo "标记已推送"; break; fi
+              echo "标记推送冲突（第 $i 次），10 秒后重试"
+              sleep 10
+            done
           fi
 
       - name: 结果摘要（手机上 GitHub App 也能直接看）
@@ -155,5 +159,123 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: grab-logs
+          path: debug_median/
+          if-no-files-found: ignore
+
+  grab2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    concurrency:
+      group: grab2
+      cancel-in-progress: false
+    env:
+      TZ: Asia/Shanghai
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 预检（窗口外/今日已处理则跳过后续全部步骤；手动触发不受此限）
+        id: precheck
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          echo "北京时间 $(TZ=Asia/Shanghai date '+%F %T')"
+          HM=$(( (10#$(TZ=Asia/Shanghai date +%H)) * 60 + 10#$(TZ=Asia/Shanghai date +%M) ))
+          if [ "$HM" -lt 390 ] || [ "$HM" -gt 690 ]; then
+            echo "不在抢座窗口（06:30-11:30），跳过本轮"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TODAY=$(TZ=Asia/Shanghai date +%F)
+          if [ -f "done2_${TODAY}.txt" ]; then
+            echo "今日($TODAY) 账号2 已处理：$(cat done2_${TODAY}.txt) → 本轮作废"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=0" >> "$GITHUB_OUTPUT"
+
+      - name: 时区自检（一眼看清程序在哪个时刻跑）
+        if: steps.precheck.outputs.skip != '1'
+        run: |
+          echo "UTC:        $(date -u '+%F %T %Z')"
+          echo "Shanghai:  $(TZ=Asia/Shanghai date '+%F %T %Z')"
+          echo "Runner本地: $(date '+%F %T %Z')"
+
+      - name: 设置时区（代码层已固定北京时间，这里只是兜底）
+        if: steps.precheck.outputs.skip != '1'
+        run: sudo timedatectl set-timezone Asia/Shanghai || true
+
+      - name: 准备 Python
+        if: steps.precheck.outputs.skip != '1'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        if: steps.precheck.outputs.skip != '1'
+        run: |
+          python -m pip install --disable-pip-version-check --quiet requests Pillow cryptography
+
+      - name: 生成配置（账号2 → config2.json；房间/时分/AI key 共用主配置）
+        if: steps.precheck.outputs.skip != '1'
+        env:
+          CX_USER2: ${{ secrets.CX_USER2 }}
+          CX_PASS2: ${{ secrets.CX_PASS2 }}
+          CX_SEAT_NUM2: ${{ secrets.CX_SEAT_NUM2 }}
+          CX_ROOM_ID: ${{ secrets.CX_ROOM_ID }}
+          CX_START: ${{ secrets.CX_START }}
+          CX_END: ${{ secrets.CX_END }}
+          CX_GRAB_TIME: ${{ secrets.CX_GRAB_TIME }}
+          CX_RESERVE_NEXT_DAY: ${{ secrets.CX_RESERVE_NEXT_DAY }}
+          CX_DAYS: ${{ secrets.CX_DAYS }}
+          DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_KEY }}
+          GLM_KEY: ${{ secrets.GLM_KEY }}
+          NOTIFY_WEBHOOK: ${{ secrets.NOTIFY_WEBHOOK }}
+        run: python render_config.py --suffix 2
+
+      - name: 执行（账号2，独立标记 done2_*）
+        if: steps.precheck.outputs.skip != '1'
+        env:
+          MODE: ${{ inputs.mode || 'grab' }}
+          FORCE_IMMEDIATE: ${{ (github.event_name == 'workflow_dispatch' && inputs.force == 'yes') && '1' || '' }}
+          CONFIG_FILE: config2.json
+          DONE_FLAG_PREFIX: done2
+        run: |
+          case "$MODE" in
+            dryrun)  python -u main.py dryrun ;;
+            diagnose) python -u diagnose.py ;;
+            grab)    python -u main.py grab ;;
+            *)       echo "未知模式 $MODE"; exit 2 ;;
+          esac
+
+      - name: 提交今日标记（账号2，供后续 run 作废判断）
+        if: (!cancelled()) && steps.precheck.outputs.skip != '1'
+        run: |
+          TODAY=$(TZ=Asia/Shanghai date +%F)
+          if [ -f "done2_${TODAY}.txt" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            for i in 1 2 3; do
+              git pull --rebase origin main || true
+              git add "done2_${TODAY}.txt" || true
+              git commit -m "done2 ${TODAY}: $(cat done2_${TODAY}.txt)" || true
+              if git push; then echo "标记已推送"; break; fi
+              echo "标记推送冲突（第 $i 次），10 秒后重试"
+              sleep 10
+            done
+          fi
+
+      - name: 结果摘要（手机上 GitHub App 也能直接看）
+        if: (!cancelled()) && steps.precheck.outputs.skip != '1'
+        run: |
+          echo "## 抢座任务结果（账号2）" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          tail -n 40 debug_median/log_*.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null \
+            || echo "(无日志产出)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传日志
+        if: (!cancelled()) && steps.precheck.outputs.skip != '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: grab2-logs
           path: debug_median/
           if-no-files-found: ignore
