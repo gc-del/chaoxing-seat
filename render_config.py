@@ -33,13 +33,23 @@ def env_bool(name, default=False):
         return default
     return v in ("1", "true", "yes", "on")
 
-def build_config():
+def build_config(suffix=""):
+    if suffix:
+        account = {
+            "username": env(f"CX_USER{suffix}", required=True),
+            "password": env(f"CX_PASS{suffix}", required=True),
+            "seat_num": env(f"CX_SEAT_NUM{suffix}", required=True),
+        }
+    else:
+        account = {
+            "username": env("CX_USER", required=True),
+            "password": env("CX_PASS", required=True),
+            "seat_num": env("CX_SEAT_NUM", "192"),
+        }
     return {
         "dry_run": env_bool("CX_DRY_RUN", False),
-        "username": env("CX_USER", required=True),
-        "password": env("CX_PASS", required=True),
+        **account,
         "room_id": env("CX_ROOM_ID", "6657"),
-        "seat_num": env("CX_SEAT_NUM", "192"),
         "start_time": env("CX_START", "12:00"),
         "end_time": env("CX_END", "22:00"),
         "grab_time": env("CX_GRAB_TIME", "07:00:00"),
@@ -77,14 +87,19 @@ def build_config():
 
 
 def main():
-    cfg = build_config()
+    suffix = ""
+    if "--suffix" in sys.argv:
+        idx = sys.argv.index("--suffix")
+        if idx + 1 < len(sys.argv):
+            suffix = sys.argv[idx + 1].strip()
+    cfg = build_config(suffix)
     if "--check" in sys.argv:
         print(f"必填项齐全: user={cfg['username']} room={cfg['room_id']} "
               f"seat={cfg['seat_num']} mode={cfg['captcha_mode']} "
               f"provider={cfg['ai_providers']} "
               f"key={'有' if cfg['deepseek_api_key'] else '无'}")
         return
-    out = BASE / "config.json"
+    out = BASE / (f"config{suffix}.json" if suffix else "config.json")
     if "--out" in sys.argv:
         idx = sys.argv.index("--out")
         if idx + 1 < len(sys.argv):
