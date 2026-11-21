@@ -1,5 +1,6 @@
 # 敏感配置（含账号密码与 API key），绝不入库
 config.json
+config2.json
 
 # 运行期产物
 debug_median/
@@ -21,4 +22,5 @@ harness_verify.js
 !requirements.txt
 
 # 但"今日完成标记"必须入库（Actions 用它判断是否作废本轮）
-!done_*.txt
+# 注意：账号2 标记为 done2_*，必须用 done* 放行（done_* 匹配不到 done2_）
+!done*.txt
