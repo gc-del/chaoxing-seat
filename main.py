@@ -184,6 +184,8 @@ def done_flag_exists():
 
 SEAT_ISSUE_KEYWORDS = ("已被占", "已被预约", "已占用", "座位已满", "座位不存在",
                         "已被别人")
+# 明确的时间问题（换座也没用）——注意"该时间段已被占用"是座位被占，不能靠"时间"二字一刀切排除
+TIME_ISSUE_KEYWORDS = ("已过", "已结束", "未开始", "不在可预约", "不在预约")
 
 
 def build_seat_candidates(cfg):
@@ -221,7 +223,7 @@ def is_seat_issue(msg):
     """
     if not msg:
         return False
-    if "时段" in msg or "时间段" in msg or "时间" in msg:
+    if any(k in msg for k in TIME_ISSUE_KEYWORDS):
         return False
     return any(k in msg for k in SEAT_ISSUE_KEYWORDS)
 
