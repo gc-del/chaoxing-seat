@@ -163,6 +163,8 @@ jobs:
           if-no-files-found: ignore
 
   grab2:
+    # 账号2 已停用；如需恢复：gh variable set GRAB2_ENABLED -R gc-del/chaoxing-seat --body true
+    if: ${{ vars.GRAB2_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 110
     concurrency:
